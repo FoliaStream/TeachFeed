@@ -77,6 +77,9 @@ if not ready:
 
 
 if st.button("Generate assessment", type="primary", disabled=not ready):
+    for k in ("report", "usage", "play_from"):          # ← add these two lines
+        st.session_state.pop(k, None)
+        
     upload_dir = Path(os.getcwd()) / "input" / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
@@ -84,7 +87,7 @@ if st.button("Generate assessment", type="primary", disabled=not ready):
     for old_file in upload_dir.iterdir():
         if old_file.is_file():
             old_file.unlink()
-            
+
     saved_path = upload_dir / f"{uuid.uuid4().hex}{Path(video_file.name).suffix.lower()}"
     saved_path.write_bytes(video_file.getbuffer())        
 
@@ -98,12 +101,12 @@ if st.button("Generate assessment", type="primary", disabled=not ready):
 
     with st.spinner("Analysing the video, this can take a minute..."):
         try:
-            report = assess_video(
+            report, usage = assess_video(
                 api_key=st.secrets["GEMINI_API_KEY"],
                 video_path=str(saved_path),
                 task_description=task_description,
                 teacher_note=teacher_note,
-            )
+                )
             st.session_state["report"] = report.model_dump()
         except Exception as e:
             st.error(f"Assessment failed: {e}")
@@ -134,6 +137,14 @@ def build_text_report(report: dict, request: dict) -> str:
     lines += ["Summary", report["summary"], ""]
     lines += ["Strengths"] + [f"- {s}" for s in report["strengths"]] + [""]
     lines += ["Areas to improve"] + [f"- {a}" for a in report["areas_to_improve"]]
+    lines += ["", "Detailed comments"]
+    for c in report["comments"]:
+        lines += [
+            f"[{c['timestamp']}] {c['category']}",
+            f'  Said: "{c["quote"]}"',
+            f"  Better: {c['correction']}",
+            "",
+        ]
     return "\n".join(lines)
 
 # ------------------------------------
@@ -148,8 +159,8 @@ CATEGORY_COLORS = {
 
 if "report" in st.session_state:
     report = st.session_state["report"]
-    request = st.session_state["video_request"]
-
+    request = {**st.session_state["video_request"], "student_label": student_label}
+    
     st.divider()
     st.header("Draft report")
     col_player, col_report = st.columns([2, 3], gap="large")
