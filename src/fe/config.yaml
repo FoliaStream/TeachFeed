@@ -1,0 +1,10 @@
+# -- CONFIG FILE --
+
+# PAGES
+pages:
+  - HOME
+  - VIDEO
+
+# MAIN PAGE
+main_page: HOME
+
