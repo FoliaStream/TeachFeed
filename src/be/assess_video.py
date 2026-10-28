@@ -35,7 +35,9 @@ Rules:
   explanation.
 - The teacher's notes describe context, tone and focus. Use them to decide emphasis and how
   kindly to phrase things, but never to change or invent findings.
-- Write the feedback in English, addressed to the teacher."""
+- Write the feedback in the language the teacher asks for in their notes or extra instructions;
+  if none is requested, use English. Always keep transcript, quote and correction in the
+  language the student speaks, and keep category exactly as one of the listed English values."""
 
 def _upload_and_wait(client, path, timeout=300):
     f = client.files.upload(file=path)
