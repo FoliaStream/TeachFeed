@@ -36,3 +36,11 @@ SIDEBAR_STYLES = {
         "box-shadow": "0 4px 12px rgba(43, 108, 163, 0.25)",
     },
 }
+
+CATEGORY_COLORS = {
+    "language": "blue",
+    "delivery": "violet",
+    "content": "green",
+    "structure": "orange",
+    "other": "gray",
+}

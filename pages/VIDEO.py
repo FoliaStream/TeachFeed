@@ -2,12 +2,13 @@ import streamlit as st
 import os 
 import yaml
 import uuid
+import re
 
 from pathlib import Path
-from src.be.assess_video import assess_video
+from src.be.assess_video import assess_video, mmss_to_seconds, build_text_report
 
 from src.fe.support_functions import setup_sidebar
-from src.fe.styles import HIDE_SIDEBAR_NAV
+from src.fe.styles import HIDE_SIDEBAR_NAV, CATEGORY_COLORS
 
 ################
 # --- SET UP ---
@@ -110,52 +111,6 @@ if st.button("Generate assessment", type="primary", disabled=not ready):
             st.session_state["report"] = report.model_dump()
         except Exception as e:
             st.error(f"Assessment failed: {e}")
-
-
-# ------------------------------------
-def mmss_to_seconds(ts: str) -> int:
-    try:
-        parts = [int(p) for p in ts.strip().split(":")]
-    except ValueError:
-        return 0
-    seconds = 0
-    for p in parts:
-        seconds = seconds * 60 + p
-    return seconds
-
-import re
-from datetime import date
-
-def build_text_report(report: dict, request: dict) -> str:
-    title = "Video assessment"
-    if request["student_label"]:
-        title += f" - {request['student_label']}"
-
-    lines = [title, f"Date: {date.today():%d %B %Y}", ""]
-    if request["task_description"]:
-        lines += ["Task", request["task_description"], ""]
-    lines += ["Summary", report["summary"], ""]
-    lines += ["Strengths"] + [f"- {s}" for s in report["strengths"]] + [""]
-    lines += ["Areas to improve"] + [f"- {a}" for a in report["areas_to_improve"]]
-    lines += ["", "Detailed comments"]
-    for c in report["comments"]:
-        lines += [
-            f"[{c['timestamp']}] {c['category']}",
-            f'  Said: "{c["quote"]}"',
-            f"  Better: {c['correction']}",
-            "",
-        ]
-    return "\n".join(lines)
-
-# ------------------------------------
-
-CATEGORY_COLORS = {
-    "language": "blue",
-    "delivery": "violet",
-    "content": "green",
-    "structure": "orange",
-    "other": "gray",
-}
 
 if "report" in st.session_state:
     report = st.session_state["report"]

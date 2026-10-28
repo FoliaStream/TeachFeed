@@ -2,6 +2,8 @@ import time
 from google import genai
 from google.genai import types, errors
 from pydantic import BaseModel, Field
+import re
+from datetime import date
 
 # tried in this order; use the exact IDs that client.models.list() shows for your key
 MODELS = ["gemini-3.6-flash"]#, "gemini-3.5-flash-lite", "gemini-3.8-flash"]
@@ -96,3 +98,37 @@ def assess_video(api_key, video_path, task_description="", teacher_note=""):
         raise last_error
     finally:
         client.files.delete(name=video.name)               # remove the uploaded copy from Google's storage
+
+
+def mmss_to_seconds(ts: str) -> int:
+    try:
+        parts = [int(p) for p in ts.strip().split(":")]
+    except ValueError:
+        return 0
+    seconds = 0
+    for p in parts:
+        seconds = seconds * 60 + p
+    return seconds
+
+
+
+def build_text_report(report: dict, request: dict) -> str:
+    title = "Video assessment"
+    if request["student_label"]:
+        title += f" - {request['student_label']}"
+
+    lines = [title, f"Date: {date.today():%d %B %Y}", ""]
+    if request["task_description"]:
+        lines += ["Task", request["task_description"], ""]
+    lines += ["Summary", report["summary"], ""]
+    lines += ["Strengths"] + [f"- {s}" for s in report["strengths"]] + [""]
+    lines += ["Areas to improve"] + [f"- {a}" for a in report["areas_to_improve"]]
+    lines += ["", "Detailed comments"]
+    for c in report["comments"]:
+        lines += [
+            f"[{c['timestamp']}] {c['category']}",
+            f'  Said: "{c["quote"]}"',
+            f"  Better: {c['correction']}",
+            "",
+        ]
+    return "\n".join(lines)
