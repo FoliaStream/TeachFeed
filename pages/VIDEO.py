@@ -80,7 +80,7 @@ if not ready:
 
 
 if st.button("Generate assessment", type="primary", disabled=not ready):
-    for k in ("report", "usage", "model", "play_from"):
+    for k in ("video_report", "video_usage", "video_model", "video_play_from"):
         st.session_state.pop(k, None)
         
     upload_dir = Path(os.getcwd()) / "input" / "uploads"
@@ -110,9 +110,9 @@ if st.button("Generate assessment", type="primary", disabled=not ready):
                 task_description=task_description,
                 teacher_note=teacher_note,
                 )
-            st.session_state["report"] = report.model_dump()
-            st.session_state["model"] = model
-            st.session_state["usage"] = {
+            st.session_state["video_report"] = report.model_dump()
+            st.session_state["video_model"] = model
+            st.session_state["video_usage"] = {
                 "input": usage.prompt_token_count or 0,
                 "output": usage.candidates_token_count or 0,
                 "total": usage.total_token_count or 0,
@@ -120,8 +120,8 @@ if st.button("Generate assessment", type="primary", disabled=not ready):
         except Exception as e:
             st.error(f"Assessment failed: {e}")
 
-if "report" in st.session_state:
-    report = st.session_state["report"]
+if "video_report" in st.session_state:
+    report = st.session_state["video_report"]
     request = {**st.session_state["video_request"], "student_label": student_label}
     
     st.divider()
@@ -129,11 +129,11 @@ if "report" in st.session_state:
     col_player, col_report = st.columns([2, 3], gap="large")
 
     with col_player:
-        st.video(request["video_path"], start_time=st.session_state.get("play_from", 0))
-        if "usage" in st.session_state:
-            u = st.session_state["usage"]
+        st.video(request["video_path"], start_time=st.session_state.get("video_play_from", 0))
+        if "video_usage" in st.session_state:
+            u = st.session_state["video_usage"]
             st.caption(f"Tokens used: {u['input']:,} in · {u['output']:,} out · {u['total']:,} total"
-                       f" · model: {st.session_state.get('model', '?')}")
+                       f" · model: {st.session_state.get('video_model', '?')}")
 
     with col_report:
         st.subheader("Summary")
@@ -156,7 +156,7 @@ if "report" in st.session_state:
                 top, btn = st.columns([4, 1])
                 top.markdown(f":{color}-background[{c['category']}] **{c['timestamp']}**")
                 if btn.button("▶ Play", key=f"play_{i}"):
-                    st.session_state["play_from"] = max(mmss_to_seconds(c["timestamp"]) - 1, 0)
+                    st.session_state["video_play_from"] = max(mmss_to_seconds(c["timestamp"]) - 1, 0)
                     st.rerun()
                 st.markdown(f"> {c['quote']}")
                 st.markdown(f"**Issue:** {c['issue']}")
