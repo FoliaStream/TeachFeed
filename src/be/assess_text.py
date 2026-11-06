@@ -4,11 +4,11 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageDraw, ImageFont
 from google import genai
-from google.genai import types, errors
+from google.genai import types
 from pydantic import BaseModel, Field
 
-MODELS = ["gemini-3.6-flash"]            # use the exact IDs that client.models.list() shows
-RETRYABLE = {429, 500, 503, 504}         # rate limit, server error, overloaded, timeout
+from src.be.model_router import generate_with_fallback
+
 MAX_SIDE = 1024                          # longest side of a page image, in pixels [2000, 1536, 1024]
 
 # only used if the browser reports an odd mime type; m4a may need converting to mp3
@@ -162,7 +162,8 @@ def _config(system, use_thinking=True):
 ####################
 
 def assess_pages(api_key, request):
-    """Returns (report dict with numbered findings, prepared page images as JPEG bytes, usage)."""
+    """Returns (report dict with numbered findings, prepared page images as JPEG bytes, usage).
+    report["model"] holds the name of the model that answered."""
     client = genai.Client(
         api_key=api_key.strip(),
         http_options=types.HttpOptions(timeout=300_000),     # 5 minutes, in milliseconds
@@ -170,30 +171,12 @@ def assess_pages(api_key, request):
     uploaded = []
     try:
         contents, pages = _build_contents(client, request, uploaded)
+        response, model = generate_with_fallback(client, contents, lambda t: _config(SYSTEM, t))
 
-        last_error = None
-        for model in MODELS:
-            use_thinking = True
-            for attempt in range(2):                          # 2 tries per model
-                try:
-                    response = client.models.generate_content(
-                        model=model, contents=contents, config=_config(SYSTEM, use_thinking),
-                    )
-                    if response.parsed is None:
-                        raise ValueError(f"Could not parse the model output:\n{response.text}")
-                    report = response.parsed.model_dump()
-                    report["findings"] = number_findings(report["findings"], len(pages))
-                    print(f"model used: {model}", flush=True)
-                    return report, pages, response.usage_metadata
-                except errors.APIError as e:
-                    last_error = e
-                    if e.code == 400 and use_thinking and "thinking" in str(e).lower():
-                        use_thinking = False                  # this model rejects the level: retry without it
-                        continue
-                    if e.code not in RETRYABLE:
-                        raise                                 # e.g. invalid key: stop immediately
-                    time.sleep(5 * (attempt + 1))             # wait 5 s, then 10 s
-        raise last_error
+        report = response.parsed.model_dump()
+        report["findings"] = number_findings(report["findings"], len(pages))
+        report["model"] = model
+        return report, pages, response.usage_metadata
     finally:
         for f in uploaded:                                    # remove uploaded copies from Google's storage
             try:

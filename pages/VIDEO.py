@@ -80,7 +80,7 @@ if not ready:
 
 
 if st.button("Generate assessment", type="primary", disabled=not ready):
-    for k in ("report", "usage", "play_from"):          # ← add these two lines
+    for k in ("report", "usage", "model", "play_from"):
         st.session_state.pop(k, None)
         
     upload_dir = Path(os.getcwd()) / "input" / "uploads"
@@ -104,13 +104,19 @@ if st.button("Generate assessment", type="primary", disabled=not ready):
 
     with st.spinner("Analysing the video, this can take a minute..."):
         try:
-            report, usage = assess_video(
+            report, usage, model = assess_video(
                 api_key=st.secrets["GEMINI_API_KEY"],
                 video_path=str(saved_path),
                 task_description=task_description,
                 teacher_note=teacher_note,
                 )
             st.session_state["report"] = report.model_dump()
+            st.session_state["model"] = model
+            st.session_state["usage"] = {
+                "input": usage.prompt_token_count or 0,
+                "output": usage.candidates_token_count or 0,
+                "total": usage.total_token_count or 0,
+            }
         except Exception as e:
             st.error(f"Assessment failed: {e}")
 
@@ -126,7 +132,8 @@ if "report" in st.session_state:
         st.video(request["video_path"], start_time=st.session_state.get("play_from", 0))
         if "usage" in st.session_state:
             u = st.session_state["usage"]
-            st.caption(f"Tokens used: {u['input']:,} in · {u['output']:,} out · {u['total']:,} total")
+            st.caption(f"Tokens used: {u['input']:,} in · {u['output']:,} out · {u['total']:,} total"
+                       f" · model: {st.session_state.get('model', '?')}")
 
     with col_report:
         st.subheader("Summary")

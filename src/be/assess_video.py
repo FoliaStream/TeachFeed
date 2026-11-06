@@ -1,13 +1,11 @@
 import time
 from google import genai
-from google.genai import types, errors
+from google.genai import types
 from pydantic import BaseModel, Field
 import re
 from datetime import date
 
-# tried in this order; use the exact IDs that client.models.list() shows for your key
-MODELS = ["gemini-3.6-flash"]#, "gemini-3.5-flash-lite", "gemini-3.8-flash"]
-RETRYABLE = {429, 500, 503, 504}   # rate limit, server error, overloaded, timeout
+from src.be.model_router import generate_with_fallback
 
 class Comment(BaseModel):
     timestamp: str = Field(description="Moment in the video, format MM:SS")
@@ -64,6 +62,7 @@ def _config(use_thinking=True):
     )
 
 def assess_video(api_key, video_path, task_description="", teacher_note=""):
+    """Returns (report, usage, name of the model that answered)."""
     client = genai.Client(
         api_key=api_key.strip(),
         http_options=types.HttpOptions(timeout=180_000),   # 3 minutes, in milliseconds
@@ -75,27 +74,8 @@ def assess_video(api_key, video_path, task_description="", teacher_note=""):
             f"Teacher's notes:\n{teacher_note or '(none)'}\n\n"
             "Assess the whole video from start to end, with detailed, timestamped comments."
         )
-        last_error = None
-        for model in MODELS:
-            use_thinking = True
-            for attempt in range(2):                       # 2 tries per model
-                try:
-                    response = client.models.generate_content(
-                        model=model, contents=[video, prompt], config=_config(use_thinking),
-                    )
-                    if response.parsed is None:
-                        raise ValueError(f"Could not parse the model output:\n{response.text}")
-                    print(f"model used: {model}", flush=True)
-                    return response.parsed, response.usage_metadata
-                except errors.APIError as e:
-                    last_error = e
-                    if e.code == 400 and use_thinking and "thinking" in str(e).lower():
-                        use_thinking = False               # this model rejects the level: retry without it
-                        continue
-                    if e.code not in RETRYABLE:
-                        raise                              # e.g. invalid key: stop immediately
-                    time.sleep(5 * (attempt + 1))          # wait 5 s, then 10 s
-        raise last_error
+        response, model = generate_with_fallback(client, [video, prompt], _config)
+        return response.parsed, response.usage_metadata, model
     finally:
         client.files.delete(name=video.name)               # remove the uploaded copy from Google's storage
 

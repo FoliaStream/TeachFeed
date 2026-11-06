@@ -270,7 +270,8 @@ if "report" in st.session_state:
 
     if "usage" in st.session_state:
         u = st.session_state["usage"]
-        st.caption(f"Tokens used: {u['input']:,} in · {u['output']:,} out · {u['total']:,} total")
+        st.caption(f"Tokens used: {u['input']:,} in · {u['output']:,} out · {u['total']:,} total"
+                   f" · model: {report.get('model', '?')}")
 
     with st.expander("Transcription (as read by the AI, check it against the pages)"):
         for pt in report["transcriptions"]:
