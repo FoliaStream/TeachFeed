@@ -4,6 +4,7 @@
 pages:
   - HOME
   - VIDEO
+  - TEXT
 
 # MAIN PAGE
 main_page: HOME

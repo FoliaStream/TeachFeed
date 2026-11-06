@@ -29,6 +29,8 @@ if selected_page == "HOME":
     pass
 elif selected_page == "VIDEO":
     st.switch_page("pages/VIDEO.py")
+elif selected_page == "TEXT":
+    st.switch_page("pages/TEXT.py")
 
 # --- LOGO-TITLE ---
 col1,col2,col3 = st.columns([1,2,1])
