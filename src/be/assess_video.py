@@ -74,8 +74,8 @@ def assess_video(api_key, video_path, task_description="", teacher_note=""):
             f"Teacher's notes:\n{teacher_note or '(none)'}\n\n"
             "Assess the whole video from start to end, with detailed, timestamped comments."
         )
-        response, model = generate_with_fallback(client, [video, prompt], _config)
-        return response.parsed, response.usage_metadata, model
+        parsed, response, model = generate_with_fallback(client, [video, prompt], _config, Report)
+        return parsed, response.usage_metadata, model
     finally:
         client.files.delete(name=video.name)               # remove the uploaded copy from Google's storage
 

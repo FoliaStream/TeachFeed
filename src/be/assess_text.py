@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image, ImageOps, ImageDraw, ImageFont
 from google import genai
 from google.genai import types
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.be.model_router import generate_with_fallback
 
@@ -20,10 +20,12 @@ AUDIO_MIME = {".mp3": "audio/mp3", ".wav": "audio/wav", ".m4a": "audio/mp4",
 ###############
 
 class PageText(BaseModel):
+    model_config = ConfigDict(coerce_numbers_to_str=True)
     page: int = Field(description="1-based index of the student page")
     text: str = Field(description="Faithful transcription of everything written on that page, in reading order. Show crossed-out text as [crossed out: ...] in the place where it was written. Do not correct anything. Write [illegible] for words you cannot read.")
 
 class Finding(BaseModel):
+    model_config = ConfigDict(coerce_numbers_to_str=True)
     page: int = Field(description="1-based index of the student page")
     kind: str = Field(description="One of: error, wrong_answer, matching, good")
     label: str = Field(description="Question or section, e.g. 'Q3', 'Rewrite 2', 'Paragraph'; empty if unclear")
@@ -31,9 +33,10 @@ class Finding(BaseModel):
     correction: str = Field(description="The corrected text, or the expected answer from the key")
     explanation: str = Field(description="One short sentence on why")
     confidence: str = Field(description="One of: high, medium, low")
-    box: list[int] = Field(description="[ymin, xmin, ymax, xmax] on a 0-1000 scale relative to that page image, tightly around the quoted text")
+    box: list[float] = Field(description="[ymin, xmin, ymax, xmax] on a 0-1000 scale relative to that page image, tightly around the quoted text")
 
 class PagesReport(BaseModel):
+    model_config = ConfigDict(coerce_numbers_to_str=True)
     transcriptions: list[PageText]
     summary: str
     strengths: list[str]
@@ -136,7 +139,7 @@ def number_findings(findings: list[dict], n_pages: int) -> list[dict]:
         box = list(f["box"])[:4]
         if len(box) != 4:
             box = [0, 0, 0, 0]
-        box = [max(0, min(1000, int(v))) for v in box]    # keep inside the 0-1000 scale
+        box = [max(0, min(1000, int(round(v)))) for v in box]    # keep inside the 0-1000 scale
         ymin, ymax = sorted((box[0], box[2]))
         xmin, xmax = sorted((box[1], box[3]))
         f["box"] = [ymin, xmin, ymax, xmax]
@@ -171,9 +174,10 @@ def assess_pages(api_key, request):
     uploaded = []
     try:
         contents, pages = _build_contents(client, request, uploaded)
-        response, model = generate_with_fallback(client, contents, lambda t: _config(SYSTEM, t))
+        parsed, response, model = generate_with_fallback(
+            client, contents, lambda t: _config(SYSTEM, t), PagesReport)
 
-        report = response.parsed.model_dump()
+        report = parsed.model_dump()
         report["findings"] = number_findings(report["findings"], len(pages))
         report["model"] = model
         return report, pages, response.usage_metadata
