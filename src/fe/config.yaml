@@ -5,6 +5,7 @@ pages:
   - HOME
   - VIDEO
   - TEXT
+  - EXERCISE
 
 # MAIN PAGE
 main_page: HOME

@@ -31,6 +31,8 @@ elif selected_page == "VIDEO":
     st.switch_page("pages/VIDEO.py")
 elif selected_page == "TEXT":
     st.switch_page("pages/TEXT.py")
+elif selected_page == "EXERCISE":
+    st.switch_page("pages/EXERCISE.py")
 
 # --- LOGO-TITLE ---
 col1,col2,col3 = st.columns([1,2,1])
@@ -53,11 +55,28 @@ with col2:
         st.subheader("Video Assessment")
         st.info("Evaluate videos using AI")
 
-        if st.button(label="EXPLORE", key='home_overview'):
+        if st.button(label="EXPLORE", key='video_explore'):
             st.session_state.selected_page = "VIDEO"
             selected_page = "VIDEO"
             st.switch_page("pages/VIDEO.py")
+        
+    with st.expander("**TEXT**"):
+        st.subheader("Text Assessment")
+        st.info("Evaluate video using AI")
 
+        if st.button(label="EXPLORE", key="text_explore"):
+            st.session_state.selected_page = "TEXT"
+            selected_page = "TEXT"
+            st.switch_page("pages/TEXT.py")
+
+    with st.expander("**EXERCISE**"):
+        st.subheader("Exercise creation")
+        st.info("Create lesson exercises using AI.")
+
+        if st.button(label="EXPLORE", key="exercises explore"):
+            st.session_state.selected_page = "EXERCISE"
+            selected_page = "EXERCISE"
+            st.switch_page("pages/EXERCISE.py")
 
 # --- FOOTER ---
 st.markdown("#")

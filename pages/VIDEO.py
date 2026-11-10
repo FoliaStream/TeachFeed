@@ -30,6 +30,8 @@ elif selected_page == "VIDEO":
     pass
 elif selected_page == "TEXT":
     st.switch_page("pages/TEXT.py")
+elif selected_page == "EXERCISE":
+    st.switch_page("pages/EXERCISE.py")
 
 # --- VIDEO INPUT ---
 st.title("Video assessment")
