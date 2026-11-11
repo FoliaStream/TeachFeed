@@ -1,5 +1,7 @@
 import io
 import re
+from pathlib import Path
+from xml.sax.saxutils import escape
 
 from PIL import Image, ImageOps
 from google import genai
@@ -10,6 +12,12 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 from pydantic import BaseModel, Field
+from reportlab.lib import colors
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph
 
 from src.be.model_router import generate_with_fallback
 
@@ -87,23 +95,33 @@ EXERCISE 1: <exercise type>
 Instructions: <one short instruction for the students>
 1. <question>
 2. <question>
+3. <question>
+4. <question>
+5. <question>
 
 EXERCISE 2: <exercise type>
 Instructions: <one short instruction for the students>
 1. <question>
+2. <question>
+3. <question>
+4. <question>
+5. <question>
 
 ANSWER KEY
-Exercise 1: 1. <answer>  2. <answer>
-Exercise 2: 1. <answer>
+Exercise 1: 1. <answer>  2. <answer>  3. <answer>  4. <answer>  5. <answer>
+Exercise 2: 1. <answer>  2. <answer>  3. <answer>  4. <answer>  5. <answer>
 
 Rules:
-- Use one exercise section per requested type (if no type is requested, choose suitable ones) and spread the total number of questions across them. The total is the number the teacher asks for in their details; if none is given, write about 10 questions.
+- Use one exercise section per requested type (if no type is requested, choose suitable ones).
+- CRITICAL: Each exercise MUST have at least 5 questions. Never write just one question per exercise.
+- The total number of questions should be the number the teacher asks for in their details. If NO number is given in the details, you MUST write exactly 10 questions in total, spread across the exercises.
 - Take the content from the lesson material and stay consistent with it.
 - Use vocabulary and grammar suited to the student level.
 - Every question has exactly one clearly correct answer. Check each answer before writing the key.
 - Multiple choice: put the options as A), B), C), D) under the question.
 - Matching: give two lists (numbers and letters) and the pairs in the answer key.
 - Write the instructions for the students in the language the teacher asks for in their notes; if none is requested, use English. Questions and answers stay in English."""
+
 
 def generate_exercises(gemini_key, material, focus, details="", skills=None, level="B1",
                        types_wanted=None, notes=""):
@@ -116,9 +134,11 @@ def generate_exercises(gemini_key, material, focus, details="", skills=None, lev
         material = material[:MAX_MATERIAL_CHARS]
         cut = "\n(The material was cut because it was too long.)"
 
+    details_text = details.strip() or "(none - generate exactly 10 questions in total)"
+
     user = (
         f"Lesson focus: {focus.strip() or '(see details)'}\n"
-        f"Details from the teacher: {details.strip() or '(none)'}\n"
+        f"Details from the teacher (including number of questions): {details_text}\n"
         f"Skills to practise: {', '.join(skills) if skills else '(not specified)'}\n"
         f"Student level: {level}\n"
         f"Exercise types: {', '.join(types_wanted) if types_wanted else '(choose suitable types)'}\n"
@@ -174,8 +194,7 @@ Rules:
 - The title slide is made separately: do not include it in slides. Give the deck a title and a short subtitle (lesson focus and level).
 - Each exercise starts on its own slide with kind "exercise". Slide title: "Exercise N: type". The first bullet is the instruction, the following bullets are the questions, numbered as in the source.
 - At most 7 bullets per slide and about 110 characters per bullet. If an exercise has more, continue on another slide titled "Exercise N: type (cont.)".
-- For multiple choice put the options in the same bullet as the question, separated by " / ".
-- After all the exercises, add the answers with kind "answers": one slide per exercise, title "Answers: Exercise N", one bullet per answer.
+- For multiple choice: keep the question and its options in the same bullet, but put each option on a new line by inserting a newline character (\n) before the option letter (e.g., "1. Question?\nA) opt1\nB) opt2\nC) opt3").- After all the exercises, add the answers with kind "answers": one slide per exercise, title "Answers: Exercise N", one bullet per answer.
 - notes: one short teaching tip or instruction for the teacher for each exercise slide. Leave it empty for answer slides.
 - Write slide text in the same language as the exercises and their instructions."""
 
@@ -287,3 +306,103 @@ def build_pptx(deck: dict) -> bytes:
     buf = io.BytesIO()
     prs.save(buf)
     return buf.getvalue()
+
+
+###################################
+# --- 5. PDF SLIDES ---
+###################################
+
+# The font must support accents (Vietnamese). The first pair that exists is used.
+FONT_CANDIDATES = [
+    ("assets/fonts/DejaVuSans.ttf", "assets/fonts/DejaVuSans-Bold.ttf"),
+    ("/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+    ("/Library/Fonts/Arial.ttf", "/Library/Fonts/Arial Bold.ttf"),
+    ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+]
+_FONT_CACHE = {}
+
+def _pdf_fonts():
+    """Returns (body font, bold font, warning or None)."""
+    if "result" in _FONT_CACHE:
+        return _FONT_CACHE["result"]
+    for regular, bold in FONT_CANDIDATES:
+        r, b = Path(regular), Path(bold)
+        if not r.is_absolute():
+            r, b = Path.cwd() / r, Path.cwd() / b
+        if r.exists() and b.exists():
+            pdfmetrics.registerFont(TTFont("SlideBody", str(r)))
+            pdfmetrics.registerFont(TTFont("SlideBody-Bold", str(b)))
+            _FONT_CACHE["result"] = ("SlideBody", "SlideBody-Bold", None)
+            return _FONT_CACHE["result"]
+    warning = ("No font with accent support was found, so accented letters (for example Vietnamese) "
+               "may be missing in the PDF. Put DejaVuSans.ttf and DejaVuSans-Bold.ttf in assets/fonts/.")
+    _FONT_CACHE["result"] = ("Helvetica", "Helvetica-Bold", warning)
+    return _FONT_CACHE["result"]
+
+def _esc(text):
+    return escape(text or "").replace("\n", "<br/>")
+
+def build_pdf_slides(deck: dict):
+    """The same slides as the PowerPoint, as a PDF. Returns (pdf bytes, font warning or None)."""
+    body, bold, warning = _pdf_fonts()
+    W, H = 960, 540                                   # 16:9, the same size as the PowerPoint slides (in points)
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(W, H))
+    c.setTitle(deck["title"])
+
+    def rect(x, y, w, h, hex_color):
+        c.setFillColor(colors.HexColor(hex_color))
+        c.rect(x, y, w, h, stroke=0, fill=1)
+
+    # title slide
+    rect(0, 0, W, H, "#F7F9F4")
+    rect(0, 0, 36, H, "#2B6CA3")
+    rect(36, 0, 11, H, "#3A9A9F")
+    title = Paragraph(_esc(deck["title"]), ParagraphStyle(
+        "title", fontName=bold, fontSize=46, leading=54, textColor=colors.HexColor("#2B6CA3")))
+    sub = Paragraph(_esc(deck["subtitle"]), ParagraphStyle(
+        "sub", fontName=body, fontSize=24, leading=30, textColor=colors.HexColor("#3A9A9F")))
+    _, th = title.wrap(780, 400)
+    _, sh = sub.wrap(780, 200)
+    title.drawOn(c, 96, 280)
+    sub.drawOn(c, 96, 280 - 24 - sh)
+    c.showPage()
+
+    # content slides
+    header_h = 86
+    for item in deck["slides"]:
+        answers = item["kind"] == "answers"
+        rect(0, 0, W, H, "#F7F9F4")
+        rect(0, H - header_h, W, header_h, "#3A9A9F" if answers else "#2B6CA3")
+        heading = Paragraph(_esc(item["title"]), ParagraphStyle(
+            "heading", fontName=bold, fontSize=30, leading=36, textColor=colors.white))
+        _, hh = heading.wrap(W - 100, header_h)
+        heading.drawOn(c, 50, H - header_h + (header_h - hh) / 2)
+
+        bullets = item["bullets"]
+        size = _body_size(bullets)
+        x, width = 54, W - 108
+        top, bottom = H - header_h - 34, 36
+        while True:                                    # shrink the text until it fits the slide
+            paras = []
+            for b in bullets:
+                numbered = re.match(r"^\s*(\d+[\.\)]|[A-Da-d][\.\)])\s", b)
+                paras.append(Paragraph(_esc(b if numbered else f"•  {b}"), ParagraphStyle(
+                    "body", fontName=body, fontSize=size, leading=size * 1.25,
+                    textColor=colors.HexColor("#1F3B57"))))
+            gap = size * 0.6
+            total = sum(p.wrap(width, 10000)[1] for p in paras) + gap * max(len(paras) - 1, 0)
+            if total <= top - bottom or size <= 12:
+                break
+            size -= 1
+
+        y = top
+        for p in paras:
+            _, h = p.wrap(width, 10000)
+            p.drawOn(c, x, y - h)
+            y -= h + gap
+        c.showPage()
+
+    c.save()
+    return buf.getvalue(), warning

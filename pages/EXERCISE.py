@@ -3,7 +3,8 @@ import os
 import re
 import yaml 
 
-from src.be.exercises import generate_exercises, transcribe_material, create_deck, build_pptx
+from src.be.exercises import (generate_exercises, transcribe_material, create_deck,
+                              build_pptx, build_pdf_slides)
 from src.fe.support_functions import setup_sidebar
 from src.fe.styles import HIDE_SIDEBAR_NAV, CATEGORY_COLORS
 
@@ -32,8 +33,8 @@ elif selected_page == "EXERCISE":
 
 # Everything this page keeps in st.session_state starts with "exercise_",
 # so it can never clash with the other pages.
-EXERCISE_KEYS = ("exercise_text", "exercise_material", "exercise_usage",
-                 "exercise_deck", "exercise_pptx", "exercise_deck_model")
+EXERCISE_KEYS = ("exercise_text", "exercise_material", "exercise_usage", "exercise_deck",
+                 "exercise_pptx", "exercise_pdf", "exercise_pdf_warning", "exercise_deck_model")
 
 EXERCISE_TYPES = ["Gap fill", "Multiple choice", "Matching", "Error correction",
                   "Sentence transformation", "Short answer", "True / False"]
@@ -150,36 +151,44 @@ if "exercise_text" in st.session_state:
         with st.expander("Text read from the pictures (check it against the pages)"):
             st.text(st.session_state["exercise_material"])
 
-    # --- 5. Presentation (Gemini + python-pptx) ---
+    # --- 5. Presentation (Gemini writes the slides, this app builds the files) ---
     st.subheader("5. Presentation")
     if st.button("Create presentation"):
-        for k in ("exercise_deck", "exercise_pptx", "exercise_deck_model"):
+        for k in ("exercise_deck", "exercise_pptx", "exercise_pdf", "exercise_pdf_warning",
+                  "exercise_deck_model"):
             st.session_state.pop(k, None)
         try:
             with st.spinner("Designing the slides..."):
                 deck, _, model = create_deck(
-                    st.secrets["GEMINI_API_KEY"],
-                    st.session_state["exercise_text"],
-                )
+                    st.secrets["GEMINI_API_KEY"], st.session_state["exercise_text"])
                 st.session_state["exercise_deck"] = deck
                 st.session_state["exercise_deck_model"] = model
                 st.session_state["exercise_pptx"] = build_pptx(deck)
+                pdf_bytes, pdf_warning = build_pdf_slides(deck)
+                st.session_state["exercise_pdf"] = pdf_bytes
+                st.session_state["exercise_pdf_warning"] = pdf_warning
         except Exception as e:
             st.error(f"Could not create the presentation: {e}")
 
     if "exercise_pptx" in st.session_state:
         deck = st.session_state["exercise_deck"]
-        st.success(f"{len(deck['slides']) + 1} slides ready · made with "
+        st.success(f"{len(deck['slides']) + 1} slides ready · text written by "
                    f"{st.session_state.get('exercise_deck_model', '?')}")
 
         name_source = exercise_label.strip() or deck["title"]
         safe_name = re.sub(r"[^\w-]+", "_", name_source).strip("_") or "exercises"
-        st.download_button(
-            "⬇ Download presentation (.pptx)",
-            data=st.session_state["exercise_pptx"],
+
+        col_pptx, col_pdf = st.columns(2)
+        col_pptx.download_button(
+            "⬇ Download PowerPoint (.pptx)", data=st.session_state["exercise_pptx"],
             file_name=f"{safe_name}.pptx",
-            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        )
+            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
+        col_pdf.download_button(
+            "⬇ Download PDF", data=st.session_state["exercise_pdf"],
+            file_name=f"{safe_name}.pdf", mime="application/pdf")
+
+        if st.session_state.get("exercise_pdf_warning"):
+            st.warning(st.session_state["exercise_pdf_warning"])
 
         with st.expander("Slide outline"):
             st.markdown(f"**{deck['title']}** — {deck['subtitle']}")
