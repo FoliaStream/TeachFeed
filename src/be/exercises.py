@@ -78,67 +78,64 @@ def transcribe_material(gemini_key, images):
 # --- 2. EXERCISES (Gemini) ---
 ###################################
 
-class ExerciseSheet(BaseModel):
-    text: str = Field(
-        description="The complete exercise sheet plus answer key, in the exact plain-text "
-                    "layout described in the system instructions."
-    )
+class Item(BaseModel):
+    question: str = Field(description="The question text. For multiple choice, include the options A) B) C) D) on separate lines.")
+    answer: str = Field(description="The correct answer")
+
+class Exercise(BaseModel):
+    type: str = Field(description="Exercise type, e.g. Gap fill")
+    instructions: str = Field(description="One short instruction for the students")
+    options: str = Field(description="For matching exercises: the lettered list the numbered items are matched to. Empty otherwise.")
+    items: list[Item]
+
+class Sheet(BaseModel):
+    title: str = Field(description="Short lesson title")
+    exercises: list[Exercise]
 
 EXERCISE_SYSTEM = """You are an experienced English teacher who writes classroom exercises.
-Write exercises based on the lesson material you are given.
-Put the whole sheet in the `text` field. That text is plain text only, in exactly this layout,
-with no markdown symbols such as ** or #:
-
-TITLE: <short lesson title>
-
-EXERCISE 1: <exercise type>
-Instructions: <one short instruction for the students>
-1. <question>
-2. <question>
-3. <question>
-4. <question>
-5. <question>
-
-EXERCISE 2: <exercise type>
-Instructions: <one short instruction for the students>
-1. <question>
-2. <question>
-3. <question>
-4. <question>
-5. <question>
-
-ANSWER KEY
-Exercise 1: 1. <answer>  2. <answer>  3. <answer>  4. <answer>  5. <answer>
-Exercise 2: 1. <answer>  2. <answer>  3. <answer>  4. <answer>  5. <answer>
-
+Return the exercises in the given structure.
 Rules:
-- Use one exercise section per requested type (if no type is requested, choose suitable ones).
-- CRITICAL: Each exercise MUST have at least 5 questions. Never write just one question per exercise.
-- The total number of questions should be the number the teacher asks for in their details. If NO number is given in the details, you MUST write exactly 10 questions in total, spread across the exercises.
+- Write exactly the number of exercises the teacher requires, with exactly the required number of questions in each. An exercise is one numbered activity with its own short instruction and several questions. Never merge exercises and never stop early.
+- The required counts in the message override anything else the teacher wrote about numbers.
+- Use the exercise types listed. If more exercises are required than types, reuse the types with different content and slightly different difficulty. If no type is listed, vary the types.
+- Never repeat a question or an answer across the exercises.
 - Take the content from the lesson material and stay consistent with it.
 - Use vocabulary and grammar suited to the student level.
-- Every question has exactly one clearly correct answer. Check each answer before writing the key.
-- Multiple choice: put the options as A), B), C), D) under the question.
-- Matching: give two lists (numbers and letters) and the pairs in the answer key.
+- Every question has exactly one clearly correct answer. Check each answer before you write it.
+- Multiple choice: put the options A), B), C), D) on separate lines inside the question text.
+- Matching: each question is a numbered item, `options` holds the lettered list, and the answer is the matching letter.
 - Write the instructions for the students in the language the teacher asks for in their notes; if none is requested, use English. Questions and answers stay in English."""
 
+def sheet_to_text(title, exercises):
+    """The sheet as plain text for the review box, in the layout the slide step expects."""
+    lines = [f"TITLE: {title}", ""]
+    for i, e in enumerate(exercises, 1):
+        lines += [f"EXERCISE {i}: {e.type}", f"Instructions: {e.instructions}"]
+        if e.options.strip():
+            lines.append(e.options.strip())
+        lines += [f"{j}. {it.question}" for j, it in enumerate(e.items, 1)]
+        lines.append("")
+    lines.append("ANSWER KEY")
+    for i, e in enumerate(exercises, 1):
+        lines.append(f"Exercise {i}: " + "  ".join(f"{j}. {it.answer}" for j, it in enumerate(e.items, 1)))
+    return "\n".join(lines)
 
 def generate_exercises(gemini_key, material, focus, details="", skills=None, level="B1",
-                       types_wanted=None, notes=""):
+                       types_wanted=None, notes="", n_exercises=6, per_exercise=5):
     """Returns (exercise text, usage dict).
-    focus: short description of the lesson focus. details: what the exercises should be about
-    (number of exercises, grammar point...). notes: extra instructions, including the language."""
+    focus: short description of the lesson focus. details: what the exercises should be about.
+    notes: extra instructions, including the language.
+    The number of exercises is checked: if the answer has fewer, more are requested until it matches."""
     material = material.strip()
     cut = ""
     if len(material) > MAX_MATERIAL_CHARS:
         material = material[:MAX_MATERIAL_CHARS]
         cut = "\n(The material was cut because it was too long.)"
 
-    details_text = details.strip() or "(none - generate exactly 10 questions in total)"
-
-    user = (
+    base = (
+        f"REQUIRED COUNTS: exactly {n_exercises} exercises, each with exactly {per_exercise} questions.\n"
         f"Lesson focus: {focus.strip() or '(see details)'}\n"
-        f"Details from the teacher (including number of questions): {details_text}\n"
+        f"Details from the teacher: {details.strip() or '(none)'}\n"
         f"Skills to practise: {', '.join(skills) if skills else '(not specified)'}\n"
         f"Student level: {level}\n"
         f"Exercise types: {', '.join(types_wanted) if types_wanted else '(choose suitable types)'}\n"
@@ -146,30 +143,47 @@ def generate_exercises(gemini_key, material, focus, details="", skills=None, lev
         f"LESSON MATERIAL:\n{material}{cut}"
     )
 
-    client = genai.Client(api_key=gemini_key.strip(), http_options=types.HttpOptions(timeout=180_000))
+    client = genai.Client(api_key=gemini_key.strip(), http_options=types.HttpOptions(timeout=240_000))
 
     def config(use_thinking):
         return types.GenerateContentConfig(
             system_instruction=EXERCISE_SYSTEM,
             response_mime_type="application/json",
-            response_schema=ExerciseSheet,
+            response_schema=Sheet,
             temperature=0.7,
-            max_output_tokens=8192,
+            max_output_tokens=32768,
             thinking_config=types.ThinkingConfig(thinking_level="low") if use_thinking else None,
         )
 
-    # Exercise generation is the core content, so use the default Flash-first order.
-    parsed, response, _ = generate_with_fallback(client, [user], config, ExerciseSheet)
-    text = parsed.text.strip()
-    if not text:
-        raise ExerciseError("Gemini returned an empty exercise sheet. Try again.")
+    usage = {"prompt_tokens": 0, "completion_tokens": 0}
 
-    um = response.usage_metadata
-    usage = {
-        "prompt_tokens": (um.prompt_token_count or 0) if um else 0,
-        "completion_tokens": (um.candidates_token_count or 0) if um else 0,
-    }
-    return text, usage
+    def ask(user):
+        # Exercise generation is the core content, so use the default Flash-first order.
+        parsed, response, _ = generate_with_fallback(client, [user], config, Sheet)
+        um = response.usage_metadata
+        if um:
+            usage["prompt_tokens"] += um.prompt_token_count or 0
+            usage["completion_tokens"] += um.candidates_token_count or 0
+        return parsed
+
+    sheet = ask(base)
+    exercises = list(sheet.exercises)
+
+    for _ in range(3):                                        # top up if the answer has too few exercises
+        if len(exercises) >= n_exercises:
+            break
+        missing = n_exercises - len(exercises)
+        have = "\n".join(
+            f"{i}. {e.type}: {e.items[0].question[:70] if e.items else ''}" for i, e in enumerate(exercises, 1))
+        more = ask(base + f"\n\nALREADY WRITTEN ({len(exercises)} exercises):\n{have}\n\n"
+                          f"Write exactly {missing} MORE exercises, different from the ones above. "
+                          f"Return only the new ones.")
+        exercises += list(more.exercises)
+
+    exercises = exercises[:n_exercises]
+    if not exercises:
+        raise ExerciseError("Gemini returned no exercises. Try again.")
+    return sheet_to_text(sheet.title, exercises), usage
 
 
 ###################################
@@ -194,7 +208,8 @@ Rules:
 - The title slide is made separately: do not include it in slides. Give the deck a title and a short subtitle (lesson focus and level).
 - Each exercise starts on its own slide with kind "exercise". Slide title: "Exercise N: type". The first bullet is the instruction, the following bullets are the questions, numbered as in the source.
 - At most 7 bullets per slide and about 110 characters per bullet. If an exercise has more, continue on another slide titled "Exercise N: type (cont.)".
-- For multiple choice: keep the question and its options in the same bullet, but put each option on a new line by inserting a newline character (\n) before the option letter (e.g., "1. Question?\nA) opt1\nB) opt2\nC) opt3").- After all the exercises, add the answers with kind "answers": one slide per exercise, title "Answers: Exercise N", one bullet per answer.
+- For multiple choice put the options in the same bullet as the question, separated by " / ".
+- After all the exercises, add the answers with kind "answers". Title "Answers: Exercise N", one bullet per answer. When there are many short exercises, put the answers of several exercises on one slide (title "Answers: Exercises 1-3"), at most 7 bullets per slide.
 - notes: one short teaching tip or instruction for the teacher for each exercise slide. Leave it empty for answer slides.
 - Write slide text in the same language as the exercises and their instructions."""
 
@@ -209,7 +224,7 @@ def create_deck(gemini_key, exercises_text):
             response_mime_type="application/json",
             response_schema=Deck,
             temperature=0.3,
-            max_output_tokens=16384,
+            max_output_tokens=32768,
             thinking_config=types.ThinkingConfig(thinking_level="low") if use_thinking else None,
         )
 

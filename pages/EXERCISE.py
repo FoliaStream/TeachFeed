@@ -33,7 +33,7 @@ elif selected_page == "EXERCISE":
 
 # Everything this page keeps in st.session_state starts with "exercise_",
 # so it can never clash with the other pages.
-EXERCISE_KEYS = ("exercise_text", "exercise_material", "exercise_usage", "exercise_deck",
+EXERCISE_KEYS = ("exercise_text", "exercise_material", "exercise_usage", "exercise_requested", "exercise_deck",
                  "exercise_pptx", "exercise_pdf", "exercise_pdf_warning", "exercise_deck_model")
 
 EXERCISE_TYPES = ["Gap fill", "Multiple choice", "Matching", "Error correction",
@@ -80,7 +80,7 @@ with col_details:
     )
     task_description = st.text_area(
         "What is the exercise about?",
-        placeholder="e.g. Number of exercises or focus grammar.",
+        placeholder="e.g. focus grammar, topic, words to include.",
         height=120,
     )
     skills_selected = st.multiselect("Focus skills", ["Writing", "Reading", "Speaking"])
@@ -89,6 +89,9 @@ with col_details:
         "Exercise types (optional)", EXERCISE_TYPES,
         help="Leave empty to let the AI choose suitable types.",
     )
+    col_n, col_q = st.columns(2)
+    n_exercises = col_n.number_input("Number of exercises", min_value=1, max_value=30, value=6, step=1)
+    per_exercise = col_q.number_input("Questions in each", min_value=1, max_value=12, value=5, step=1)
 
 # --- 3. Teacher notes ---
 st.subheader("3. Your notes")
@@ -126,10 +129,12 @@ if st.button("Generate exercises", type="primary", disabled=not ready):
             text, usage = generate_exercises(
                 st.secrets["GEMINI_API_KEY"], material,
                 exercise_label, task_description, skills_selected, level, types_wanted, teacher_note,
+                int(n_exercises), int(per_exercise),
             )
         st.session_state["exercise_material"] = material if source == "Photos" else ""
         st.session_state["exercise_text"] = text          # the review box below is bound to this key
         st.session_state["exercise_usage"] = usage
+        st.session_state["exercise_requested"] = int(n_exercises)
     except Exception as e:
         st.error(f"Could not generate the exercises: {e}")
 
@@ -141,6 +146,9 @@ if "exercise_text" in st.session_state:
                "including the answer key at the end.")
 
     st.text_area("Exercises", key="exercise_text", height=520, label_visibility="collapsed")
+
+    written = len(re.findall(r"^EXERCISE \d+:", st.session_state["exercise_text"], flags=re.M))
+    st.caption(f"{written} exercises in the box · requested: {st.session_state.get('exercise_requested', '?')}")
 
     usage = st.session_state.get("exercise_usage") or {}
     if usage:
