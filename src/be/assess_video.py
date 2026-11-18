@@ -292,7 +292,8 @@ def build_text_report(report: dict, request: dict) -> str:
         lines += [
             f"[{c['timestamp']}] {c['category']}",
             f'  Said: "{c["quote"]}"',
-            f"  Better: {c['correction']}",
+            f'  Issue: "{c["issue"]}"',
+            f"  Correction: {c['correction']}",
             "",
         ]
     return "\n".join(lines)
